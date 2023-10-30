@@ -1,0 +1,212 @@
+import win32com.client
+from datetime import datetime, timedelta
+import re
+import time
+import os
+import virustotal_python
+import requests
+import argparse
+import os
+import time
+import json
+import pymsteams
+import subprocess
+import schedule
+import xlsxwriter
+import pyodbc
+
+sendListForReport=[]
+dailyReportList=[]
+
+def getApexMails():
+        mailList=[]
+        outlook = win32com.client.Dispatch('outlook.application')
+        mapi = outlook.GetNamespace("MAPI")
+        inbox=mapi.GetDefaultFolder(6).Folders.Item("<Folder_Name>")
+        messages=inbox.Items
+        received_dt=datetime.now()- timedelta(minutes=2)
+        received_dt=received_dt.strftime('%m/%d/%Y %H:%M %p')
+        messages=messages.Restrict("[ReceivedTime] >= '" + received_dt + "'")
+        messages=messages.Restrict("[SenderEmailAddress] = '<Mail>'")
+        messages=messages.Restrict("[Subject] = '<Subject>'")
+        allMessage=list(messages)
+        for i in allMessage:
+                body=str(i.body)
+                url= body.split("URL: ")[1].split("\n")[0].strip()
+                ip= body.split("Blocked user IP: ")[1].split("\n")[0].strip()
+                mailList.append({"ip":ip,"url":url})
+        return mailList
+
+def getHostNameInAD(ip):
+        try:
+                test = "Powershell [System.Net.Dns]::GetHostByAddress('"+ip+"').hostname"
+                learnHost= subprocess.check_output(test).decode()
+        except:
+                learnHost = ip
+        return learnHost
+
+def getResultFromVirusTotalAPI(reportURL,url,count):
+        apiKey=""
+        if count<4:
+                apiKey="<Key1>"
+        elif count<8:
+                apiKey="<Key2>"
+        elif count<12:
+                apiKey="<Key3>"
+        elif count<16:
+                apiKey="<Key4>"
+        elif count<20:
+                apiKey="<Key5>" 
+        elif count<24:
+                apiKey="<Key6>"
+        elif count<28:
+                apiKey="<Key7>"       
+        params={'apikey': apiKey, 'resource': url,'scan':1}
+        response=requests.get(reportURL, params=params)
+        responseJSON=json.loads(response.content)
+        return responseJSON
+
+def sendToTrendMicroGroupInTeams(sendList):
+
+        for data in sendList:
+              sendTeams= "HOSTNAME : "+data["hostName"] + "\n" + "\nURL : " +data["url"] + "\n" + "\nSTATUS :"+data["result"]
+              myTeamsMessage = pymsteams.connectorcard("<Teams_Webhook_URL_Adress>")
+              myTeamsMessage.text(sendTeams)
+              myTeamsMessage.send()
+
+def exportToExcel():
+        global dailyReportList
+        guncelTarih=datetime.now()
+        subject=<date-now>.strftime("%d.%m.%Y") + '<Report-Name.xlsx>'
+        workbook = xlsxwriter.Workbook(subject)
+        worksheet = workbook.add_worksheet()
+
+        row = 0
+        col = 0
+        i=1
+        total=0
+        trueStatus=0
+        falseStatus=0
+
+        worksheet.write(row,col,"<Value1>")
+        worksheet.write(row,col+1,"<Value2>")
+        row=1
+        worksheet.write(row,col,"")
+        worksheet.write(row,col+1,"Hostname")
+        worksheet.write(row,col+2,"URL")
+        worksheet.write(row,col+3,"Status")
+        row=2
+  
+        if  len(dailyReportList)>0:
+                for item in dailyReportList:
+                        worksheet.write(row, col, i)
+                        worksheet.write(row, col + 1 ,item['hostName'])
+                        worksheet.write(row, col + 2, item['url'])
+                        worksheet.write(row, col + 3, item['result'])
+                        total+=1
+                        if item['result']=="Positive":
+                                trueStatus+=1
+                        elif item['result']=="FalsePositive":
+                                falseStatus+=1
+                        row += 1
+                        i+=1
+
+                worksheet.write(row + 1 , 1, '<Total:> '+str(total))
+                worksheet.write(row + 1, 2, '<Positive Total:> '+str(trueStatus))
+                worksheet.write(row + 1, 3, '<False Positive Total:> '+str(falseStatus))
+
+                workbook.close()
+                dailyReportList=[]
+
+def main():
+        global sendListForReport
+        global dailyReportList
+        print("Data that could not be scanned in the previous minute ;")
+        print(sendListForReport)
+        reportURL = 'https://www.virustotal.com/vtapi/v2/url/report'
+        countRequestInMinute=0
+        positive=0
+        falsePositive=0
+        unscan=0
+        runTime=datetime.now()
+        hourMinute=runTime.strftime("%X")
+        print("Tarama başlatıldı. Saat : "+hourMinute)
+        apexMailList=getApexMails()
+        scanList=apexMailList
+        for apexMail in scanList:
+                for dailyReport in dailyReportList:
+                        if (apexMail["url"]==dailyReport["url"]) and (apexMail["ip"]==dailyReport["ip"]):
+                                apexMailList.remove(apexMail)
+                                break
+
+        if sendListForReport is not None and len(sendListForReport)>0:
+                for data in sendListForReport:
+                        apexMailList.append(data)           
+        sendListForReport=[]
+
+        print("---- "+str(len(apexMailList))+" adet apex maili bulundu.")
+        if apexMailList is not None and len(apexMailList)>0:
+                print("---- Bulunan URL'ler taranıyor...")
+                for mail in apexMailList:
+                        ip=mail["ip"]
+                        url=mail["url"]
+                        hostName=getHostNameInAD(mail["ip"]).strip()
+                        mail["hostName"]=hostName
+                        response=getResultFromVirusTotalAPI(reportURL,mail["url"],countRequestInMinute)
+                        countRequestInMinute+=1
+                        if response["response_code"]==1:
+                                if "positives" in response:
+                                        if response['positives'] == 0:
+                                                mail["result"]="FalsePositive"
+                                                falsePositive+=1
+                                        elif response['positives'] >= 1:
+                                                mail["result"]="Positive"
+                                                positive+=1
+                                        dailyReportList.append(mail)
+                                else:
+                                        mail["result"]="The URL has been submitted for crawling."
+                                        result=mail["result"]
+                                        unscan+=1
+                                        sendListForReport.append({"ip":ip,"url":url,"hostName":hostName,"result":result})
+                for i in apexMailList:
+                        hn=i["hostName"]
+                        uri=i["url"]
+                        res=i["result"]
+                        data_base(hn,uri,res)
+        
+                sendToTrendMicroGroupInTeams(apexMailList)
+               
+                print("---- Positive : " + str(positive))
+                print("---- FalsePositive : " + str(falsePositive))
+                print("---- Unscan : " + str(unscan))
+        
+        print("Scanning finished.")
+        print("--------------")
+
+def data_base(hostName,url,result):
+        todayD=datetime.now()
+        todayD=todayD.strftime('%m/%d/%Y %H:%M')
+        conn = pyodbc.connect('Driver={SQL Server};'
+                      'Server=<server_name>'
+                      'Database=<db_name>;'
+                      'Trusted_Connection=yes;')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO TSOC.dbo.Apex_Logs (HOSTNAME,URL,STATUS,LOG_DATE) values('"+hostName+"','"+url+"','"+result+"','"+todayD+"')")
+        conn.commit()
+        cursor.close()
+
+schedule.every(1).minutes.do(main)
+#schedule.every().day.at("17:30").do(exportToExcel)  
+
+while True:
+    schedule.run_pending()
+    time.sleep(1)
+
+
+
+
+
+
+
+
+
