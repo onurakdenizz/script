@@ -18,7 +18,7 @@ import pyodbc
 sendListForReport=[]
 dailyReportList=[]
 
-def getApexMails():
+def getMails():
         mailList=[]
         outlook = win32com.client.Dispatch('outlook.application')
         mapi = outlook.GetNamespace("MAPI")
@@ -130,13 +130,13 @@ def main():
         unscan=0
         runTime=datetime.now()
         hourMinute=runTime.strftime("%X")
-        print("Tarama başlatıldı. Saat : "+hourMinute)
-        apexMailList=getApexMails()
-        scanList=apexMailList
-        for apexMail in scanList:
+        print("Scan started. Hour : "+hourMinute)
+        MailList=getMails()
+        scanList=MailList
+        for Mail in scanList:
                 for dailyReport in dailyReportList:
-                        if (apexMail["url"]==dailyReport["url"]) and (apexMail["ip"]==dailyReport["ip"]):
-                                apexMailList.remove(apexMail)
+                        if (apexMail["url"]==dailyReport["url"]) and (Mail["ip"]==dailyReport["ip"]):
+                                MailList.remove(Mail)
                                 break
 
         if sendListForReport is not None and len(sendListForReport)>0:
@@ -144,10 +144,10 @@ def main():
                         apexMailList.append(data)           
         sendListForReport=[]
 
-        print("---- "+str(len(apexMailList))+" adet apex maili bulundu.")
-        if apexMailList is not None and len(apexMailList)>0:
-                print("---- Bulunan URL'ler taranıyor...")
-                for mail in apexMailList:
+        print("---- "+str(len(MailList))+" Number of mail found.")
+        if apexMailList is not None and len(MailList)>0:
+                print("---- Searching found URLs...")
+                for mail in MailList:
                         ip=mail["ip"]
                         url=mail["url"]
                         hostName=getHostNameInAD(mail["ip"]).strip()
@@ -164,17 +164,17 @@ def main():
                                                 positive+=1
                                         dailyReportList.append(mail)
                                 else:
-                                        mail["result"]="The URL has been submitted for crawling."
+                                        mail["result"]="The URL has been submitted for searching."
                                         result=mail["result"]
                                         unscan+=1
                                         sendListForReport.append({"ip":ip,"url":url,"hostName":hostName,"result":result})
-                for i in apexMailList:
+                for i in MailList:
                         hn=i["hostName"]
                         uri=i["url"]
                         res=i["result"]
                         data_base(hn,uri,res)
         
-                sendToTrendMicroGroupInTeams(apexMailList)
+                sendToTrendMicroGroupInTeams(MailList)
                
                 print("---- Positive : " + str(positive))
                 print("---- FalsePositive : " + str(falsePositive))
