@@ -141,7 +141,7 @@ def main():
 
         if sendListForReport is not None and len(sendListForReport)>0:
                 for data in sendListForReport:
-                        apexMailList.append(data)           
+                        MailList.append(data)           
         sendListForReport=[]
 
         print("---- "+str(len(MailList))+" Number of mail found.")
